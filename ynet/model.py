@@ -12,7 +12,9 @@ from utils.image_utils import create_gaussian_heatmap_template, create_dist_mat,
 from utils.dataloader import SceneDataset, scene_collate
 from test import evaluate
 from train import train
+import weights_and_biases as wandb
 
+MODEL_PATH = 'saved_models/Ynet'
 
 class YNetEncoder(nn.Module):
 	def __init__(self, in_channels, channels=(64, 128, 256, 512, 512)):
@@ -196,7 +198,7 @@ class YNetTorch(nn.Module):
 
 
 class YNet:
-	def __init__(self, obs_len, pred_len, params):
+	def __init__(self, obs_len, pred_len, params, version):
 		"""
 		Ynet class, following a sklearn similar class structure
 		:param obs_len: observed timesteps
@@ -206,7 +208,7 @@ class YNet:
 		self.obs_len = obs_len
 		self.pred_len = pred_len
 		self.division_factor = 2 ** len(params['encoder_channels'])
-
+		self.save_path = MODEL_PATH+self.version+'.pt'
 		self.model = YNetTorch(obs_len=obs_len,
 							   pred_len=pred_len,
 							   segmentation_model_fp=params['segmentation_model_fp'],
@@ -314,7 +316,8 @@ class YNet:
 													 input_template, optimizer, criterion, dataset_name, self.homo_mat)
 			self.train_ADE.append(train_ADE)
 			self.train_FDE.append(train_FDE)
-
+			metric_dict = {'train_ADE': train_ADE, 'train_FDE': train_FDE}
+			best_metrics = {}
 			# For faster inference, we don't use TTST and CWS here, only for the test set evaluation
 			val_ADE, val_FDE = evaluate(model, val_loader, val_images, num_goals, num_traj,
 										obs_len=obs_len, batch_size=batch_size,
@@ -331,6 +334,12 @@ class YNet:
 				print(f'Best Epoch {e}: \nVal ADE: {val_ADE} \nVal FDE: {val_FDE}')
 				torch.save(model.state_dict(), 'pretrained_models/' + experiment_name + '_weights.pt')
 				best_test_ADE = val_ADE
+				best_metrics = {'best_ADE':val_ADE, 'best_FDE':val_FDE}
+				save_model_wandb(self.save_path)
+				print(f"Saved model to: {self.save_path}")
+			log_losses(loss=train_loss, mode="train", epoch=e)
+			log_metrics(metrics=self.metric_dict, mode="test", epoch=e)
+			log_summary(best_metrics=best_metrics)
 
 	def evaluate(self, data, params, image_path, batch_size=8, num_goals=20, num_traj=1, rounds=1, device=None, dataset_name=None):
 		"""
